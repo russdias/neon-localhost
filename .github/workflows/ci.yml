@@ -93,7 +93,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
 
       - name: Lint workflows
-        run: "$RUNNER_TEMP/actionlint"
+        run: '"$RUNNER_TEMP/actionlint"'
 
   dependency-review:
     name: Dependency Review

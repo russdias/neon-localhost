@@ -182,11 +182,13 @@ jobs:
 
           checksum="$staged_dmg.sha256"
           (cd "$assets" && shasum -a 256 "$(basename "$staged_dmg")" > "$(basename "$checksum")")
-          echo "dmg=$staged_dmg" >> "$GITHUB_OUTPUT"
-          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
-          echo "updater=$staged_updater" >> "$GITHUB_OUTPUT"
-          echo "signature=$staged_updater.sig" >> "$GITHUB_OUTPUT"
-          echo "metadata=$assets/latest.json" >> "$GITHUB_OUTPUT"
+          {
+            echo "dmg=$staged_dmg"
+            echo "checksum=$checksum"
+            echo "updater=$staged_updater"
+            echo "signature=$staged_updater.sig"
+            echo "metadata=$assets/latest.json"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create draft GitHub Release
         env:
