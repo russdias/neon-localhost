@@ -46,7 +46,15 @@ nav { min-width: 0; }
 .database-label small { color: var(--subtle); font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .status-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #2aaa60; box-shadow: 0 0 0 2px rgba(42,170,96,.14); }
 .no-databases { padding: 11px 10px; color: var(--subtle); font-size: 11px; }
-.about-button { margin-top: auto; height: 31px; padding: 0 9px; display: flex; align-items: center; gap: 8px; color: var(--muted); border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 11px; cursor: default; transition: color .12s ease, background-color .12s ease; }
+.update-button { margin-top: auto; min-height: 39px; padding: 5px 9px; display: flex; align-items: center; gap: 8px; color: var(--muted); border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: default; transition: color .12s ease, background-color .12s ease; }
+.update-button > svg { width: 15px; height: 15px; flex: 0 0 15px; }
+.update-button > span { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 1px; }
+.update-button strong { overflow: hidden; font-size: 10px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.update-button small { color: var(--subtle); font-size: 8px; }
+.update-button > i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #29aa60; box-shadow: 0 0 0 2px rgba(41,170,96,.13); }
+.update-button.has-update { color: #277248; }
+.update-button:disabled { opacity: .62; }
+.about-button { margin-top: 2px; height: 31px; padding: 0 9px; display: flex; align-items: center; gap: 8px; color: var(--muted); border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 11px; cursor: default; transition: color .12s ease, background-color .12s ease; }
 .about-button svg { width: 15px; height: 15px; }
 
 .main-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--pane); }
@@ -183,11 +191,42 @@ nav { min-width: 0; }
 .status-secondary { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .status-failures { color: #a45b31; }
 
+.update-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(0,0,0,.2); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: overlay-in .16s ease-out; }
+.update-sheet { position: relative; width: 366px; min-height: 260px; padding: 30px 31px 26px; display: flex; flex-direction: column; align-items: center; color: var(--text); border: 1px solid rgba(0,0,0,.2); border-radius: 14px; background: rgba(250,250,251,.98); box-shadow: 0 22px 70px rgba(0,0,0,.3), 0 1px 2px rgba(0,0,0,.14); text-align: center; animation: sheet-in .18s cubic-bezier(.2,.75,.25,1); }
+.update-close { position: absolute; top: 12px; right: 12px; width: 24px; height: 24px; display: grid; place-items: center; color: var(--subtle); border: 0; border-radius: 50%; background: rgba(0,0,0,.055); cursor: default; }
+.update-close svg { width: 12px; height: 12px; }
+.update-close:disabled { opacity: .4; }
+.update-mark { width: 49px; height: 49px; margin-bottom: 15px; display: grid; place-items: center; color: #68686d; border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(#fff, #eeeeef); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.update-mark.available { color: #21804b; border-color: rgba(24,132,76,.18); background: linear-gradient(#edf9f2, #dff2e7); }
+.update-mark svg { width: 25px; height: 25px; }
+.update-kicker { margin: -7px 0 5px; color: var(--accent); font-size: 9px; font-weight: 650; letter-spacing: .035em; text-transform: uppercase; }
+.update-sheet h2 { margin: 0; font-size: 18px; font-weight: 620; letter-spacing: -.02em; }
+.update-sheet > p { max-height: 72px; margin: 7px 0 17px; overflow: auto; color: var(--muted); font-size: 10px; line-height: 1.45; white-space: pre-line; }
+.update-warning { width: 100%; margin: -2px 0 15px; padding: 8px 9px; display: flex; align-items: flex-start; gap: 7px; color: #765a2e; border: 1px solid rgba(171,119,35,.18); border-radius: 7px; background: rgba(255,247,226,.8); text-align: left; font-size: 9px; line-height: 1.35; }
+.update-warning svg { width: 13px; height: 13px; flex: 0 0 13px; }
+.sheet-actions { width: 100%; margin-top: auto; display: flex; justify-content: flex-end; gap: 7px; }
+.sheet-primary, .sheet-secondary { min-width: 86px; height: 29px; padding: 0 12px; border-radius: 6px; font-size: 10px; font-weight: 500; cursor: default; }
+.sheet-primary { color: #fff; border: 1px solid #117640; background: linear-gradient(#219656, #168249); box-shadow: 0 1px 1px rgba(0,0,0,.14); }
+.sheet-secondary { color: #444448; border: 1px solid rgba(0,0,0,.14); background: linear-gradient(#fff, #efeff0); box-shadow: 0 1px 1px rgba(0,0,0,.05); }
+.update-sheet > .sheet-secondary { margin-top: auto; align-self: flex-end; }
+.sheet-primary:disabled, .sheet-secondary:disabled { opacity: .58; }
+.update-progress { width: 100%; margin: 0 0 16px; }
+.update-progress > div { height: 4px; overflow: hidden; border-radius: 99px; background: rgba(100,100,105,.16); }
+.update-progress i { height: 100%; display: block; border-radius: inherit; background: #2ca562; transition: width .18s ease; }
+.update-progress span { display: block; margin-top: 6px; color: var(--subtle); font-size: 9px; }
+.update-progress.indeterminate i, .update-progress i[style="width: 32%;"] { width: 32%; animation: update-progress 1.15s ease-in-out infinite; }
+@keyframes update-progress { from { transform: translateX(-110%); } to { transform: translateX(315%); } }
+@keyframes overlay-in { from { opacity: 0; } }
+@keyframes sheet-in { from { opacity: 0; transform: scale(.97) translateY(5px); } }
+
 @media (hover: hover) {
   .database-row:hover { background: var(--hover-fill); }
   .database-row.selected:hover { background: var(--pressed-fill); }
   .database-row:hover .database-glyph { border-color: rgba(31,120,70,.22); background: rgba(224,244,232,.95); }
-  .about-button:hover { color: var(--text); background: var(--hover-fill); }
+  .about-button:hover, .update-button:hover:not(:disabled) { color: var(--text); background: var(--hover-fill); }
+  .update-close:hover:not(:disabled) { color: var(--text); background: rgba(0,0,0,.09); }
+  .sheet-primary:hover:not(:disabled) { border-color: #0e713b; background: linear-gradient(#26a15d, #18894d); }
+  .sheet-secondary:hover:not(:disabled) { color: #202024; background: linear-gradient(#fff, #e7e7e8); }
   .stop-button:hover { color: #9b3030; border-color: rgba(155,48,48,.24); background: linear-gradient(#fff, #f7eded); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
   .primary-button:hover:not(:disabled) { border-color: #0e713b; background: linear-gradient(#26a15d, #18894d); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
   .segmented-control button:not(.active):hover { color: #343438; background: rgba(255,255,255,.44); }
@@ -200,7 +239,7 @@ nav { min-width: 0; }
   .storage-refresh:hover:not(:disabled) { color: var(--text); background: var(--hover-fill); }
 }
 
-.database-row:active, .about-button:active { background: var(--pressed-fill); }
+.database-row:active, .about-button:active, .update-button:active:not(:disabled) { background: var(--pressed-fill); }
 .stop-button:active { color: #8d2929; background: #f1dfdf; box-shadow: inset 0 1px 1px rgba(0,0,0,.06); }
 .primary-button:active:not(:disabled) { border-color: #106d39; background: #147a43; box-shadow: inset 0 1px 1px rgba(0,0,0,.12); }
 .segmented-control button:active:not(.active) { background: var(--pressed-fill); }
@@ -243,4 +282,10 @@ nav { min-width: 0; }
   .temporary-footer button:hover { color: #c4e7d1; border-color: #4d825f; background: #2d4936; }
   .status-bar { background: rgba(37,37,39,.88); }
   .status-bar code { color: #a5a5aa; }
+  .update-sheet { border-color: rgba(255,255,255,.17); background: rgba(47,47,49,.98); box-shadow: 0 22px 70px rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.35); }
+  .update-close { background: rgba(255,255,255,.08); }
+  .update-mark { color: #c5c5c9; border-color: rgba(255,255,255,.14); background: linear-gradient(#444447, #353537); }
+  .update-mark.available { color: #9bd6b1; border-color: rgba(125,210,157,.18); background: linear-gradient(#294a35, #243c2d); }
+  .update-warning { color: #d8bd8e; border-color: rgba(214,164,75,.2); background: rgba(88,65,28,.35); }
+  .sheet-secondary { color: #e2e2e4; border-color: rgba(255,255,255,.16); background: linear-gradient(#49494c, #3a3a3c); }
 }

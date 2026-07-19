@@ -70,9 +70,11 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_SIGNING_IDENTITY; do
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_SIGNING_IDENTITY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             test -n "${!name:-}" || {
               echo "Required GitHub Actions secret $name is not configured" >&2
               exit 1
@@ -116,6 +118,8 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_KEY_PATH: ${{ steps.notarization.outputs.key_path }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --bundles dmg --target universal-apple-darwin
 
       - name: Notarize and verify DMG
@@ -127,16 +131,34 @@ jobs:
           APPLE_API_KEY_PATH: ${{ steps.notarization.outputs.key_path }}
         run: |
           set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          assets="$RUNNER_TEMP/release-assets"
+          mkdir -p "$assets"
           dmg="$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
           test -n "$dmg"
           xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
           xcrun stapler staple "$dmg"
           xcrun stapler validate "$dmg"
           spctl -a -t open --context context:primary-signature -vv "$dmg"
-          checksum="$dmg.sha256"
-          (cd "$(dirname "$dmg")" && shasum -a 256 "$(basename "$dmg")" > "$(basename "$checksum")")
-          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+
+          updater="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app.tar.gz' -print -quit)"
+          test -n "$updater"
+          test -s "$updater.sig"
+
+          staged_dmg="$assets/Neon.Localhost_${version}_universal.dmg"
+          staged_updater="$assets/Neon.Localhost_${version}_universal.app.tar.gz"
+          cp "$dmg" "$staged_dmg"
+          cp "$updater" "$staged_updater"
+          cp "$updater.sig" "$staged_updater.sig"
+          node scripts/create-updater-json.mjs "$version" "$staged_updater" "$staged_updater.sig" "$assets/latest.json"
+
+          checksum="$staged_dmg.sha256"
+          (cd "$assets" && shasum -a 256 "$(basename "$staged_dmg")" > "$(basename "$checksum")")
+          echo "dmg=$staged_dmg" >> "$GITHUB_OUTPUT"
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          echo "updater=$staged_updater" >> "$GITHUB_OUTPUT"
+          echo "signature=$staged_updater.sig" >> "$GITHUB_OUTPUT"
+          echo "metadata=$assets/latest.json" >> "$GITHUB_OUTPUT"
 
       - name: Create draft GitHub Release
         env:
@@ -146,11 +168,17 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" \
               "${{ steps.artifact.outputs.dmg }}" \
               "${{ steps.artifact.outputs.checksum }}" \
+              "${{ steps.artifact.outputs.updater }}" \
+              "${{ steps.artifact.outputs.signature }}" \
+              "${{ steps.artifact.outputs.metadata }}" \
               --clobber
           else
             gh release create "$GITHUB_REF_NAME" \
               "${{ steps.artifact.outputs.dmg }}" \
               "${{ steps.artifact.outputs.checksum }}" \
+              "${{ steps.artifact.outputs.updater }}" \
+              "${{ steps.artifact.outputs.signature }}" \
+              "${{ steps.artifact.outputs.metadata }}" \
               --verify-tag \
               --draft \
               --generate-notes \

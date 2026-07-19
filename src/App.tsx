@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import "./App.css";
 
 type LocalDatabase = {
@@ -15,6 +18,7 @@ type LocalDatabase = {
 
 type Format = "url" | "env" | "psql";
 type Copied = "local" | "remote" | null;
+type UpdateState = "idle" | "checking" | "available" | "current" | "downloading" | "installing" | "restarting" | "error";
 
 type ProxyMetrics = {
   running: boolean;
@@ -41,6 +45,12 @@ const previewDatabase: LocalDatabase = {
   expiresAt: new Date(Date.now() + 72 * 3_600_000).toISOString(),
   port: 5432,
 };
+
+const previewUpdate = {
+  version: "0.2.0",
+  currentVersion: "0.1.1",
+  body: "Faster startup, improved connection reliability, and a more polished update experience.",
+} as unknown as Update;
 
 const emptyMetrics: ProxyMetrics = {
   running: false,
@@ -105,10 +115,18 @@ function RefreshIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 8V4l-2 2a8 8 0 1 0 2.2 8" /><path d="M19 4h-4" /></svg>;
 }
 
+function UpdateIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4" /><path d="M5 19h14" /></svg>;
+}
+
+function CloseIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17" /></svg>;
+}
+
 function App() {
   const previewMode = import.meta.env.DEV ? new URLSearchParams(window.location.search).get("preview") : null;
   const isPreview = previewMode !== null;
-  const isRunningPreview = previewMode === "running";
+  const isRunningPreview = previewMode === "running" || previewMode === "update";
   const isCreatingPreview = previewMode === "creating";
   const [database, setDatabase] = useState<LocalDatabase | null>(isRunningPreview ? previewDatabase : null);
   const [restoring, setRestoring] = useState(!isPreview);
@@ -140,6 +158,15 @@ function App() {
   const storageRequestId = useRef(0);
   const copiedTimer = useRef<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [appVersion, setAppVersion] = useState("");
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(previewMode === "update" ? previewUpdate : null);
+  const [updateState, setUpdateState] = useState<UpdateState>(previewMode === "update" ? "available" : "idle");
+  const [updateError, setUpdateError] = useState("");
+  const [showUpdate, setShowUpdate] = useState(previewMode === "update");
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [downloadSize, setDownloadSize] = useState<number | null>(null);
+  const updateCheckInFlight = useRef(false);
+  const downloadedBytesRef = useRef(0);
 
   useEffect(() => {
     if (isPreview) return;
@@ -154,6 +181,42 @@ function App() {
       });
     return () => { cancelled = true; };
   }, [isPreview]);
+
+  const checkForUpdates = useCallback(async (showResult = true) => {
+    if (isPreview || updateCheckInFlight.current) return;
+    updateCheckInFlight.current = true;
+    setUpdateState("checking");
+    setUpdateError("");
+    try {
+      const result = await check({ target: "macos-universal", timeout: 15_000 });
+      setAvailableUpdate(result);
+      if (result) {
+        setUpdateState("available");
+        setShowUpdate(true);
+      } else {
+        setUpdateState("current");
+        if (showResult) setShowUpdate(true);
+      }
+    } catch (reason) {
+      setUpdateState("error");
+      setUpdateError("Neon Localhost couldn’t check for updates. Check your internet connection and try again.");
+      if (showResult) setShowUpdate(true);
+      console.error("Update check failed", reason);
+    } finally {
+      updateCheckInFlight.current = false;
+    }
+  }, [isPreview]);
+
+  useEffect(() => {
+    if (isPreview) return;
+    void getVersion().then(setAppVersion).catch(() => undefined);
+    const initialCheck = window.setTimeout(() => void checkForUpdates(false), 2_000);
+    const recurringCheck = window.setInterval(() => void checkForUpdates(false), 6 * 60 * 60 * 1_000);
+    return () => {
+      window.clearTimeout(initialCheck);
+      window.clearInterval(recurringCheck);
+    };
+  }, [checkForUpdates, isPreview]);
 
   useEffect(() => {
     if (!database) return;
@@ -318,6 +381,45 @@ function App() {
     }
   }
 
+  async function installUpdate() {
+    if (!availableUpdate || updateState === "downloading" || updateState === "installing" || updateState === "restarting") return;
+    setUpdateState("downloading");
+    setUpdateError("");
+    downloadedBytesRef.current = 0;
+    setDownloadedBytes(0);
+    setDownloadSize(null);
+    try {
+      await availableUpdate.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          setDownloadSize(event.data.contentLength ?? null);
+        } else if (event.event === "Progress") {
+          downloadedBytesRef.current += event.data.chunkLength;
+          setDownloadedBytes(downloadedBytesRef.current);
+        } else if (event.event === "Finished") {
+          setUpdateState("installing");
+        }
+      }, { timeout: 120_000 });
+      setUpdateState("restarting");
+      if (database) {
+        try {
+          await invoke("stop_proxy");
+        } catch {
+          // Relaunching also closes the local listener; do not strand an installed update.
+        }
+      }
+      await relaunch();
+    } catch (reason) {
+      setUpdateState("error");
+      setUpdateError("The update couldn’t be installed. Your current version is unchanged; please try again.");
+      console.error("Update install failed", reason);
+    }
+  }
+
+  const updateProgress = downloadSize && downloadSize > 0
+    ? Math.min(100, Math.round((downloadedBytes / downloadSize) * 100))
+    : null;
+  const updateBusy = updateState === "checking" || updateState === "downloading" || updateState === "installing" || updateState === "restarting";
+
   return (
     <main className="mac-window">
       <aside className="sidebar">
@@ -336,6 +438,11 @@ function App() {
           )}
         </nav>
 
+        <button type="button" className={`update-button ${availableUpdate ? "has-update" : ""}`} onClick={() => availableUpdate ? setShowUpdate(true) : void checkForUpdates(true)} disabled={updateBusy}>
+          <UpdateIcon />
+          <span><strong>{availableUpdate ? "Update available" : updateState === "checking" ? "Checking for updates…" : "Check for Updates"}</strong>{appVersion && <small>{availableUpdate ? `Version ${availableUpdate.version}` : `Version ${appVersion}`}</small>}</span>
+          {availableUpdate && <i />}
+        </button>
         <button type="button" className="about-button" onClick={openAbout}>
           <InfoIcon /><span>About neon.new</span>
         </button>
@@ -485,6 +592,44 @@ function App() {
           </div>
         </footer>
       </section>
+
+      {showUpdate && (
+        <div className="update-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !updateBusy) setShowUpdate(false); }}>
+          <section className="update-sheet" role="dialog" aria-modal="true" aria-labelledby="update-title">
+            <button type="button" className="update-close" onClick={() => setShowUpdate(false)} disabled={updateBusy} aria-label="Close"><CloseIcon /></button>
+            <span className={`update-mark ${availableUpdate ? "available" : ""}`}><UpdateIcon /></span>
+            {updateState === "current" ? (
+              <>
+                <h2 id="update-title">You’re up to date</h2>
+                <p>Neon Localhost {appVersion || ""} is the newest version available.</p>
+                <button type="button" className="sheet-secondary" onClick={() => setShowUpdate(false)}>Done</button>
+              </>
+            ) : updateState === "error" ? (
+              <>
+                <h2 id="update-title">Couldn’t update</h2>
+                <p>{updateError}</p>
+                <div className="sheet-actions"><button type="button" className="sheet-secondary" onClick={() => setShowUpdate(false)}>Cancel</button><button type="button" className="sheet-primary" onClick={() => void checkForUpdates(true)}>Try Again</button></div>
+              </>
+            ) : availableUpdate ? (
+              <>
+                <span className="update-kicker">Version {availableUpdate.version}</span>
+                <h2 id="update-title">A new version is ready</h2>
+                <p>{availableUpdate.body?.trim() || "This update includes the latest improvements and fixes."}</p>
+                {database && !updateBusy && <div className="update-warning"><InfoIcon /><span>Installing restarts the app and stops the current local database connection.</span></div>}
+                {(updateState === "downloading" || updateState === "installing" || updateState === "restarting") && (
+                  <div className="update-progress" role="status">
+                    <div><i style={{ width: updateProgress === null ? "32%" : `${updateProgress}%` }} /></div>
+                    <span>{updateState === "downloading" ? updateProgress === null ? "Downloading update…" : `Downloading… ${updateProgress}%` : updateState === "installing" ? "Installing update…" : "Restarting Neon Localhost…"}</span>
+                  </div>
+                )}
+                <div className="sheet-actions"><button type="button" className="sheet-secondary" onClick={() => setShowUpdate(false)} disabled={updateBusy}>Later</button><button type="button" className="sheet-primary" onClick={installUpdate} disabled={updateBusy}>{updateState === "downloading" ? "Downloading…" : updateState === "installing" ? "Installing…" : updateState === "restarting" ? "Restarting…" : database ? "Install & Restart" : "Install Update"}</button></div>
+              </>
+            ) : (
+              <><h2 id="update-title">Checking for updates</h2><p>Looking for the newest version of Neon Localhost…</p><div className="update-progress indeterminate"><div><i /></div></div></>
+            )}
+          </section>
+        </div>
+      )}
     </main>
   );
 }

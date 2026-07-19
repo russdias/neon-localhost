@@ -836,6 +836,8 @@ async fn resolve_claim_url(claim_url: String) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(ProxyState::default()))
         .invoke_handler(tauri::generate_handler![
             create_database,
