@@ -2,9 +2,10 @@ use percent_encoding::percent_decode_str;
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256, SCRAM_SHA_256};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex as StdMutex,
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -27,6 +28,18 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(20);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const LOCAL_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
+const MAX_STARTUP_PACKET_SIZE: usize = 64 * 1024;
+const POSTGRES_PROTOCOL_V3: u32 = 196_608;
+const SSL_REQUEST_CODE: u32 = 80_877_103;
+const GSSENC_REQUEST_CODE: u32 = 80_877_104;
+const CANCEL_REQUEST_CODE: u32 = 80_877_102;
+const USER_AGENT: &str = concat!("neon-localhost/", env!("CARGO_PKG_VERSION"));
+
+fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_be_bytes(
+        bytes.get(offset..offset.checked_add(4)?)?.try_into().ok()?,
+    ))
+}
 
 fn validated_claim_url(
     value: &str,
@@ -45,7 +58,6 @@ fn validated_claim_url(
     Ok(url)
 }
 
-#[derive(Default)]
 struct ProxyState {
     lifecycle: Mutex<()>,
     task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -54,6 +66,31 @@ struct ProxyState {
     upstream: Mutex<Option<Upstream>>,
     running: AtomicBool,
     generation: AtomicU64,
+    cancel_registry: Arc<CancelRegistry>,
+    http_client: reqwest::Client,
+}
+
+impl ProxyState {
+    fn new() -> Result<Self, String> {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let http_client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(HTTP_TIMEOUT)
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(|error| format!("Could not initialize the network client: {error}"))?;
+        Ok(Self {
+            lifecycle: Mutex::new(()),
+            task: Mutex::new(None),
+            metrics: Arc::new(ProxyMetrics::default()),
+            database: Mutex::new(None),
+            upstream: Mutex::new(None),
+            running: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            cancel_registry: Arc::new(CancelRegistry::default()),
+            http_client,
+        })
+    }
 }
 
 #[derive(Default)]
@@ -166,13 +203,80 @@ struct LocalDatabase {
     port: u16,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Upstream {
     host: String,
     port: u16,
     user: String,
     password: String,
     database: String,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct CancelKey {
+    process_id: u32,
+    secret_key: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CancelTarget {
+    host: String,
+    port: u16,
+}
+
+#[derive(Default)]
+struct CancelRegistry(StdMutex<HashMap<CancelKey, CancelTarget>>);
+
+impl CancelRegistry {
+    fn register(self: &Arc<Self>, key: CancelKey, upstream: &Upstream) -> CancelRegistration {
+        let target = CancelTarget {
+            host: upstream.host.clone(),
+            port: upstream.port,
+        };
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key, target.clone());
+        CancelRegistration {
+            registry: self.clone(),
+            key,
+            target,
+        }
+    }
+
+    fn target(&self, key: CancelKey) -> Option<CancelTarget> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .cloned()
+    }
+
+    fn clear(&self) {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+}
+
+struct CancelRegistration {
+    registry: Arc<CancelRegistry>,
+    key: CancelKey,
+    target: CancelTarget,
+}
+
+impl Drop for CancelRegistration {
+    fn drop(&mut self) {
+        let mut registry = self
+            .registry
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if registry.get(&self.key) == Some(&self.target) {
+            registry.remove(&self.key);
+        }
+    }
 }
 
 fn parse_upstream_for_port(
@@ -182,10 +286,17 @@ fn parse_upstream_for_port(
     let mut url = Url::parse(connection_string)
         .map_err(|error| format!("Neon returned an invalid connection URL: {error}"))?;
 
+    if !matches!(url.scheme(), "postgres" | "postgresql") {
+        return Err("Neon returned an unsupported connection URL".to_string());
+    }
+
     let host = url
         .host_str()
         .ok_or_else(|| "The Neon connection URL does not contain a hostname".to_string())?
-        .to_string();
+        .to_ascii_lowercase();
+    if host != "neon.tech" && !host.ends_with(".neon.tech") {
+        return Err("Neon returned a connection URL outside neon.tech".to_string());
+    }
     let port = url.port().unwrap_or(5432);
     let decode = |value: &str| percent_decode_str(value).decode_utf8_lossy().into_owned();
     let user = decode(url.username());
@@ -194,6 +305,15 @@ fn parse_upstream_for_port(
             .ok_or_else(|| "The Neon connection URL does not contain a password".to_string())?,
     );
     let database = decode(url.path().trim_start_matches('/'));
+    if user.is_empty() || database.is_empty() {
+        return Err("The Neon connection URL is missing a user or database".to_string());
+    }
+    if user.contains('\0') || database.contains('\0') {
+        return Err("The Neon connection URL contains invalid credentials".to_string());
+    }
+    if url.fragment().is_some() {
+        return Err("The Neon connection URL contains an unexpected fragment".to_string());
+    }
     url.set_host(Some("localhost"))
         .map_err(|_| "Could not create the local connection URL".to_string())?;
     url.set_port(Some(local_port))
@@ -222,18 +342,40 @@ fn parse_upstream(connection_string: &str) -> Result<(Upstream, String), String>
     parse_upstream_for_port(connection_string, LOCAL_PORT)
 }
 
-async fn connect_upstream(upstream: &Upstream) -> Result<TcpStream, String> {
-    let stream = timeout(
-        CONNECT_TIMEOUT,
-        TcpStream::connect((upstream.host.as_str(), upstream.port)),
-    )
-    .await
-    .map_err(|_| "Timed out while connecting to Neon".to_string())?
-    .map_err(|error| format!("Could not reach Neon: {error}"))?;
+async fn connect_endpoint(host: &str, port: u16) -> Result<TcpStream, String> {
+    let stream = timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| "Timed out while connecting to Neon".to_string())?
+        .map_err(|error| format!("Could not reach Neon: {error}"))?;
     stream
         .set_nodelay(true)
         .map_err(|error| format!("Could not configure the Neon connection: {error}"))?;
     Ok(stream)
+}
+
+async fn connect_tls_endpoint(host: &str, port: u16) -> Result<TlsStream<TcpStream>, String> {
+    let mut stream = connect_endpoint(host, port).await?;
+    stream
+        .write_all(&[0, 0, 0, 8, 4, 210, 22, 47])
+        .await
+        .map_err(|error| format!("Could not request Neon TLS: {error}"))?;
+    let mut tls_response = [0_u8; 1];
+    stream
+        .read_exact(&mut tls_response)
+        .await
+        .map_err(|error| format!("Neon did not answer the TLS request: {error}"))?;
+    if tls_response[0] != b'S' {
+        return Err("Neon refused the secure database connection".to_string());
+    }
+
+    let native_connector = native_tls::TlsConnector::builder()
+        .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
+        .build()
+        .map_err(|error| format!("Could not initialize TLS: {error}"))?;
+    TlsConnector::from(native_connector)
+        .connect(host, stream)
+        .await
+        .map_err(|error| format!("Could not establish Neon TLS: {error}"))
 }
 
 async fn read_backend_message<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Vec<u8>, String> {
@@ -278,15 +420,20 @@ fn parse_storage_row(message: &[u8]) -> Result<DatabaseStorage, String> {
             message[cursor + 3],
         ]);
         cursor += 4;
-        if length < 0 || cursor + length as usize > message.len() {
-            return Err("Postgres returned an invalid storage value".to_string());
-        }
-        let text = std::str::from_utf8(&message[cursor..cursor + length as usize])
+        let end = (length >= 0)
+            .then(|| cursor.checked_add(length as usize))
+            .flatten()
+            .filter(|end| *end <= message.len())
+            .ok_or_else(|| "Postgres returned an invalid storage value".to_string())?;
+        let text = std::str::from_utf8(&message[cursor..end])
             .map_err(|_| "Postgres returned a non-text storage value".to_string())?;
         *value = text
             .parse()
             .map_err(|_| "Postgres returned a non-numeric storage value".to_string())?;
-        cursor += length as usize;
+        cursor = end;
+    }
+    if cursor != message.len() {
+        return Err("Postgres returned trailing storage data".to_string());
     }
     Ok(DatabaseStorage {
         used_bytes: values[0],
@@ -338,27 +485,7 @@ fn password_message(payload: &[u8]) -> Vec<u8> {
 async fn authenticate_upstream_inner(
     upstream: &Upstream,
 ) -> Result<(TlsStream<TcpStream>, Vec<Vec<u8>>), String> {
-    let mut stream = connect_upstream(upstream).await?;
-    stream
-        .write_all(&[0, 0, 0, 8, 4, 210, 22, 47])
-        .await
-        .map_err(|error| format!("Could not request Neon TLS: {error}"))?;
-    let mut tls_response = [0_u8; 1];
-    stream
-        .read_exact(&mut tls_response)
-        .await
-        .map_err(|error| format!("Neon did not answer the TLS request: {error}"))?;
-    if tls_response[0] != b'S' {
-        return Err("Neon refused the secure database connection".to_string());
-    }
-
-    let native_connector = native_tls::TlsConnector::builder()
-        .build()
-        .map_err(|error| format!("Could not initialize TLS: {error}"))?;
-    let mut stream = TlsConnector::from(native_connector)
-        .connect(&upstream.host, stream)
-        .await
-        .map_err(|error| format!("Could not establish Neon TLS: {error}"))?;
+    let mut stream = connect_tls_endpoint(&upstream.host, upstream.port).await?;
 
     let mut startup_payload = Vec::new();
     startup_payload.extend_from_slice(&196_608_u32.to_be_bytes());
@@ -468,6 +595,39 @@ async fn authenticate_upstream(
         .map_err(|_| "Timed out while establishing the Neon database session".to_string())?
 }
 
+fn backend_cancel_key(message: &[u8]) -> Option<CancelKey> {
+    if message.len() != 13 || message[0] != b'K' || read_u32(message, 1) != Some(12) {
+        return None;
+    }
+    Some(CancelKey {
+        process_id: read_u32(message, 5)?,
+        secret_key: read_u32(message, 9)?,
+    })
+}
+
+async fn forward_cancel_inner(target: &CancelTarget, key: CancelKey) -> Result<(), String> {
+    let mut stream = connect_tls_endpoint(&target.host, target.port).await?;
+    let mut packet = [0_u8; 16];
+    packet[..4].copy_from_slice(&16_u32.to_be_bytes());
+    packet[4..8].copy_from_slice(&CANCEL_REQUEST_CODE.to_be_bytes());
+    packet[8..12].copy_from_slice(&key.process_id.to_be_bytes());
+    packet[12..].copy_from_slice(&key.secret_key.to_be_bytes());
+    stream
+        .write_all(&packet)
+        .await
+        .map_err(|error| format!("Could not forward the query cancellation to Neon: {error}"))?;
+    stream
+        .shutdown()
+        .await
+        .map_err(|error| format!("Could not finish the query cancellation: {error}"))
+}
+
+async fn forward_cancel(target: &CancelTarget, key: CancelKey) -> Result<(), String> {
+    timeout(HANDSHAKE_TIMEOUT, forward_cancel_inner(target, key))
+        .await
+        .map_err(|_| "Timed out while forwarding the query cancellation".to_string())?
+}
+
 async fn relay_direction<R, W>(
     reader: &mut R,
     writer: &mut W,
@@ -504,15 +664,27 @@ async fn proxy_connection(
     mut local: TcpStream,
     upstream: Upstream,
     metrics: Arc<ProxyMetrics>,
+    cancel_registry: Arc<CancelRegistry>,
 ) -> Result<(), String> {
     local
         .set_nodelay(true)
         .map_err(|error| format!("Could not configure the local connection: {error}"))?;
-    timeout(LOCAL_STARTUP_TIMEOUT, read_local_startup(&mut local))
+    let startup = timeout(LOCAL_STARTUP_TIMEOUT, read_local_startup(&mut local))
         .await
         .map_err(|_| "Timed out waiting for the local Postgres startup packet".to_string())??;
 
+    if let LocalStartup::Cancel(key) = startup {
+        if let Some(target) = cancel_registry.target(key) {
+            forward_cancel(&target, key).await?;
+        }
+        return Ok(());
+    }
+
     let (remote, startup_messages) = authenticate_upstream(&upstream).await?;
+    let _cancel_registration = startup_messages
+        .iter()
+        .find_map(|message| backend_cancel_key(message))
+        .map(|key| cancel_registry.register(key, &upstream));
     for message in startup_messages {
         local
             .write_all(&message)
@@ -539,15 +711,27 @@ async fn proxy_connection(
     Ok(())
 }
 
-async fn read_local_startup(local: &mut TcpStream) -> Result<(), String> {
+#[derive(Debug, PartialEq, Eq)]
+enum LocalStartup {
+    Session,
+    Cancel(CancelKey),
+}
+
+async fn read_local_startup<S>(local: &mut S) -> Result<LocalStartup, String>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let mut first_packet = [0_u8; 8];
     local
         .read_exact(&mut first_packet)
         .await
         .map_err(|error| format!("Could not read local Postgres startup: {error}"))?;
 
-    while first_packet == [0, 0, 0, 8, 4, 210, 22, 47]
-        || first_packet == [0, 0, 0, 8, 4, 210, 22, 48]
+    while read_u32(&first_packet, 0) == Some(8)
+        && matches!(
+            read_u32(&first_packet, 4),
+            Some(SSL_REQUEST_CODE) | Some(GSSENC_REQUEST_CODE)
+        )
     {
         // The loopback connection uses local trust authentication. Encryption is
         // applied by the proxy for the remote hop to Neon.
@@ -561,13 +745,27 @@ async fn read_local_startup(local: &mut TcpStream) -> Result<(), String> {
             .map_err(|error| format!("Could not read local Postgres startup: {error}"))?;
     }
 
-    let packet_length = u32::from_be_bytes([
-        first_packet[0],
-        first_packet[1],
-        first_packet[2],
-        first_packet[3],
-    ]) as usize;
-    if !(8..=1024 * 1024).contains(&packet_length) {
+    let packet_length = read_u32(&first_packet, 0)
+        .ok_or_else(|| "Invalid local Postgres startup packet".to_string())?
+        as usize;
+    let request_code = read_u32(&first_packet, 4)
+        .ok_or_else(|| "Invalid local Postgres startup packet".to_string())?;
+    if packet_length == 16 && request_code == CANCEL_REQUEST_CODE {
+        let mut cancel_payload = [0_u8; 8];
+        local
+            .read_exact(&mut cancel_payload)
+            .await
+            .map_err(|error| format!("Could not read local cancellation request: {error}"))?;
+        return Ok(LocalStartup::Cancel(CancelKey {
+            process_id: read_u32(&cancel_payload, 0)
+                .ok_or_else(|| "Invalid local cancellation request".to_string())?,
+            secret_key: read_u32(&cancel_payload, 4)
+                .ok_or_else(|| "Invalid local cancellation request".to_string())?,
+        }));
+    }
+    if request_code != POSTGRES_PROTOCOL_V3
+        || !(9..=MAX_STARTUP_PACKET_SIZE).contains(&packet_length)
+    {
         return Err("Invalid local Postgres startup packet".to_string());
     }
     let mut ignored_startup = vec![0_u8; packet_length - 8];
@@ -576,7 +774,7 @@ async fn read_local_startup(local: &mut TcpStream) -> Result<(), String> {
         .await
         .map_err(|error| format!("Could not read local Postgres startup: {error}"))?;
 
-    Ok(())
+    Ok(LocalStartup::Session)
 }
 
 struct LocalListeners {
@@ -622,7 +820,12 @@ async fn bind_local_listeners() -> Result<LocalListeners, String> {
     ))
 }
 
-async fn serve_proxy(listeners: LocalListeners, upstream: Upstream, metrics: Arc<ProxyMetrics>) {
+async fn serve_proxy(
+    listeners: LocalListeners,
+    upstream: Upstream,
+    metrics: Arc<ProxyMetrics>,
+    cancel_registry: Arc<CancelRegistry>,
+) {
     let mut connections = JoinSet::new();
     let connection_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     loop {
@@ -642,10 +845,18 @@ async fn serve_proxy(listeners: LocalListeners, upstream: Upstream, metrics: Arc
         };
         let connection_upstream = upstream.clone();
         let connection_metrics = metrics.clone();
+        let connection_cancel_registry = cancel_registry.clone();
         connections.spawn(async move {
             let _permit = permit;
             let _active = ActiveConnection::begin(connection_metrics.clone());
-            match proxy_connection(local, connection_upstream, connection_metrics.clone()).await {
+            match proxy_connection(
+                local,
+                connection_upstream,
+                connection_metrics.clone(),
+                connection_cancel_registry,
+            )
+            .await
+            {
                 Ok(()) => {}
                 Err(_) => {
                     connection_metrics
@@ -656,19 +867,7 @@ async fn serve_proxy(listeners: LocalListeners, upstream: Upstream, metrics: Arc
         });
         while connections.try_join_next().is_some() {}
     }
-}
-
-struct ProxyRunGuard {
-    state: Arc<ProxyState>,
-    generation: u64,
-}
-
-impl Drop for ProxyRunGuard {
-    fn drop(&mut self) {
-        if self.state.generation.load(Ordering::Acquire) == self.generation {
-            self.state.running.store(false, Ordering::Release);
-        }
-    }
+    connections.shutdown().await;
 }
 
 async fn stop_existing_proxy(state: &Arc<ProxyState>) {
@@ -680,6 +879,7 @@ async fn stop_existing_proxy(state: &Arc<ProxyState>) {
     state.running.store(false, Ordering::Release);
     *state.database.lock().await = None;
     *state.upstream.lock().await = None;
+    state.cancel_registry.clear();
 }
 
 fn concise_http_error(detail: &str) -> String {
@@ -703,14 +903,10 @@ async fn create_database(state: State<'_, Arc<ProxyState>>) -> Result<LocalDatab
     stop_existing_proxy(state.inner()).await;
 
     let listeners = bind_local_listeners().await?;
-    let client = reqwest::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .build()
-        .map_err(|error| format!("Could not prepare the neon.new request: {error}"))?;
-    let response = client
+    let response = state
+        .http_client
         .post(NEON_NEW_ENDPOINT)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header(reqwest::header::USER_AGENT, "neon-localhost/0.1")
         .json(&serde_json::json!({ "ref": "neon-localhost" }))
         .send()
         .await
@@ -749,11 +945,19 @@ async fn create_database(state: State<'_, Arc<ProxyState>>) -> Result<LocalDatab
     state.running.store(true, Ordering::Release);
     let run_state = state.inner().clone();
     let task = tauri::async_runtime::spawn(async move {
-        let _guard = ProxyRunGuard {
-            state: run_state.clone(),
-            generation,
-        };
-        serve_proxy(listeners, proxy_upstream, run_state.metrics.clone()).await;
+        serve_proxy(
+            listeners,
+            proxy_upstream,
+            run_state.metrics.clone(),
+            run_state.cancel_registry.clone(),
+        )
+        .await;
+        if run_state.generation.load(Ordering::Acquire) == generation {
+            run_state.running.store(false, Ordering::Release);
+            *run_state.database.lock().await = None;
+            *run_state.upstream.lock().await = None;
+            run_state.cancel_registry.clear();
+        }
     });
     *state.task.lock().await = Some(task);
     Ok(local_database)
@@ -799,16 +1003,14 @@ async fn database_storage(state: State<'_, Arc<ProxyState>>) -> Result<DatabaseS
 }
 
 #[tauri::command]
-async fn resolve_claim_url(claim_url: String) -> Result<String, String> {
+async fn resolve_claim_url(
+    state: State<'_, Arc<ProxyState>>,
+    claim_url: String,
+) -> Result<String, String> {
     let claim_url = validated_claim_url(&claim_url, "neon.new", "/claim/")?;
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(HTTP_TIMEOUT)
-        .build()
-        .map_err(|error| format!("Could not prepare the Neon claim flow: {error}"))?;
-    let response = client
+    let response = state
+        .http_client
         .get(claim_url.clone())
-        .header(reqwest::header::USER_AGENT, "neon-localhost/0.1")
         .send()
         .await
         .map_err(|error| format!("Could not start the Neon claim flow: {error}"))?;
@@ -834,11 +1036,12 @@ async fn resolve_claim_url(claim_url: String) -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let state = ProxyState::new().expect("could not initialize application state");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(Arc::new(ProxyState::default()))
+        .manage(Arc::new(state))
         .invoke_handler(tauri::generate_handler![
             create_database,
             stop_proxy,
@@ -891,6 +1094,11 @@ mod tests {
     }
 
     #[test]
+    fn application_state_initializes() {
+        ProxyState::new().expect("application state");
+    }
+
+    #[test]
     fn postgres_storage_rows_are_parsed() {
         let mut row = vec![b'D', 0, 0, 0, 0, 0, 2];
         for value in [b"82386944".as_slice(), b"104857600".as_slice()] {
@@ -903,6 +1111,8 @@ mod tests {
         let storage = parse_storage_row(&row).expect("valid storage row");
         assert_eq!(storage.used_bytes, 82_386_944);
         assert_eq!(storage.limit_bytes, 104_857_600);
+        row.push(0);
+        assert!(parse_storage_row(&row).is_err());
     }
 
     #[test]
@@ -932,6 +1142,124 @@ mod tests {
         assert_eq!(concise.chars().count(), 301);
     }
 
+    #[test]
+    fn upstream_urls_are_restricted_to_postgres_on_neon() {
+        for connection_string in [
+            "https://user:password@ep-example.neon.tech/neondb",
+            "postgresql://user:password@example.com/neondb",
+            "postgresql://user:password@neon.tech.evil.example/neondb",
+            "postgresql://:password@ep-example.neon.tech/neondb",
+            "postgresql://user:password@ep-example.neon.tech/",
+            "postgresql://user:password@ep-example.neon.tech/neondb#fragment",
+            "postgresql://us%00er:password@ep-example.neon.tech/neondb",
+        ] {
+            assert!(
+                parse_upstream(connection_string).is_err(),
+                "accepted unsafe upstream URL: {connection_string}"
+            );
+        }
+    }
+
+    #[test]
+    fn backend_key_data_is_parsed_strictly() {
+        let mut message = vec![b'K'];
+        message.extend_from_slice(&12_u32.to_be_bytes());
+        message.extend_from_slice(&1234_u32.to_be_bytes());
+        message.extend_from_slice(&5678_u32.to_be_bytes());
+        assert_eq!(
+            backend_cancel_key(&message),
+            Some(CancelKey {
+                process_id: 1234,
+                secret_key: 5678,
+            })
+        );
+        message.push(0);
+        assert_eq!(backend_cancel_key(&message), None);
+    }
+
+    #[test]
+    fn cancel_registration_is_removed_when_connection_ends() {
+        let registry = Arc::new(CancelRegistry::default());
+        let key = CancelKey {
+            process_id: 1234,
+            secret_key: 5678,
+        };
+        let upstream = Upstream {
+            host: "ep-example.neon.tech".to_string(),
+            port: 5432,
+            user: "user".to_string(),
+            password: "password".to_string(),
+            database: "neondb".to_string(),
+        };
+        {
+            let _registration = registry.register(key, &upstream);
+            assert_eq!(
+                registry.target(key),
+                Some(CancelTarget {
+                    host: upstream.host.clone(),
+                    port: upstream.port,
+                })
+            );
+        }
+        assert_eq!(registry.target(key), None);
+    }
+
+    #[tokio::test]
+    async fn local_startup_supports_ssl_negotiation_and_cancel_requests() {
+        let (mut client, mut server) = tokio::io::duplex(64);
+        let client_task = tokio::spawn(async move {
+            client
+                .write_all(&[0, 0, 0, 8, 4, 210, 22, 47])
+                .await
+                .expect("SSL request");
+            let mut response = [0_u8; 1];
+            client
+                .read_exact(&mut response)
+                .await
+                .expect("SSL response");
+            assert_eq!(response, [b'N']);
+            client
+                .write_all(&[0, 0, 0, 9, 0, 3, 0, 0, 0])
+                .await
+                .expect("startup packet");
+        });
+        assert_eq!(
+            read_local_startup(&mut server)
+                .await
+                .expect("valid startup"),
+            LocalStartup::Session
+        );
+        client_task.await.expect("client task");
+
+        let (mut client, mut server) = tokio::io::duplex(32);
+        let key = CancelKey {
+            process_id: 1234,
+            secret_key: 5678,
+        };
+        let client_task = tokio::spawn(async move {
+            let mut packet = [0_u8; 16];
+            packet[..4].copy_from_slice(&16_u32.to_be_bytes());
+            packet[4..8].copy_from_slice(&CANCEL_REQUEST_CODE.to_be_bytes());
+            packet[8..12].copy_from_slice(&key.process_id.to_be_bytes());
+            packet[12..].copy_from_slice(&key.secret_key.to_be_bytes());
+            client.write_all(&packet).await.expect("cancel request");
+        });
+        assert_eq!(
+            read_local_startup(&mut server).await.expect("valid cancel"),
+            LocalStartup::Cancel(key)
+        );
+        client_task.await.expect("client task");
+    }
+
+    #[tokio::test]
+    async fn local_startup_rejects_unknown_protocols_and_oversized_packets() {
+        for header in [[0, 0, 0, 9, 0, 4, 0, 0], [0, 1, 0, 1, 0, 3, 0, 0]] {
+            let (mut client, mut server) = tokio::io::duplex(16);
+            client.write_all(&header).await.expect("startup header");
+            assert!(read_local_startup(&mut server).await.is_err());
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires NEON_LOCAL_TEST_URL, network access, and psql"]
     async fn live_proxy_accepts_a_real_postgres_query() {
@@ -953,6 +1281,7 @@ mod tests {
             },
             upstream,
             Arc::new(ProxyMetrics::default()),
+            Arc::new(CancelRegistry::default()),
         ));
 
         // A broken client must not take down the listener.
