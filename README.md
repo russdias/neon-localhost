@@ -25,3 +25,24 @@ psql 'postgresql://localhost:5432/neondb?sslmode=disable'
 GUI clients can use `localhost`, port `5432`, database `neondb`, any username, and an empty password. SSL and additional connection options are not required on the local hop.
 
 Only one service can listen on port 5432. Stop any local Postgres or other proxy using that port before creating the database.
+
+## Releases
+
+Create a version commit and annotated tag from a clean `main` branch:
+
+```sh
+pnpm release:patch # 0.1.0 -> 0.1.1
+pnpm release:minor # 0.1.0 -> 0.2.0
+pnpm release:major # 0.1.0 -> 1.0.0
+git push origin main --follow-tags
+```
+
+The version tag triggers the macOS release workflow. It builds a universal Intel and Apple Silicon DMG, signs it with Developer ID, notarizes the app and DMG, verifies Gatekeeper acceptance, and creates a draft GitHub Release with a SHA-256 checksum.
+
+The release workflow requires these GitHub Actions secrets:
+
+- `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` for a base64-encoded Developer ID Application `.p12`;
+- `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` for notarization;
+- `APPLE_SIGNING_IDENTITY` and a generated `KEYCHAIN_PASSWORD` for the temporary CI keychain.
+
+Release jobs create drafts intentionally. Test the downloaded DMG on a second Mac, then publish the draft from GitHub Releases.
