@@ -1,35 +1,86 @@
 # Neon Localhost
 
-Create a temporary Postgres database with [neon.new](https://neon.new) and use it through a familiar local connection on `127.0.0.1:5432`.
+### Cloud Postgres. Localhost simple.
 
-Neon Localhost is a native macOS desktop app that:
+Neon Localhost turns a temporary [neon.new](https://neon.new) database into a familiar, passwordless Postgres connection on your Mac:
 
-- provisions an unclaimed, 72-hour Neon database without requiring an account;
-- starts a Postgres protocol proxy bound only to the IPv4 and IPv6 localhost interfaces on port `5432`;
-- accepts passwordless local connections and handles Neon TLS and authentication inside the proxy;
-- follows the Mac appearance by default, with persistent Light and Dark overrides;
-- provides a claim link if you want to keep the database.
+```text
+postgresql://localhost:5432/neondb?sslmode=disable
+```
 
-<img width="2032" height="1592" alt="CleanShot 2026-07-19 at 20 21 10@2x" src="https://github.com/user-attachments/assets/5c025ee8-e8e6-45c3-9e25-aebd7a207527" />
+No account. No Docker. No local Postgres installation. Create a database, point your app at `localhost:5432`, and start building.
 
-## Run it
+**[Download the latest version for macOS →](https://github.com/russdias/neon-localhost/releases/latest)**
+
+![Neon Localhost connected to a temporary Neon database on macOS](https://github.com/user-attachments/assets/5c025ee8-e8e6-45c3-9e25-aebd7a207527)
+
+## Why Neon Localhost?
+
+Cloud databases are convenient, but local development tools expect local database ergonomics. Neon Localhost bridges the two:
+
+- **Starts in seconds** — provisions a temporary Neon Postgres database without an account.
+- **Works with existing tools** — use the same `localhost:5432` connection in your app, ORM, migrations, `psql`, TablePlus, Postico, or any other Postgres client.
+- **No local credentials** — connect without a password; the app manages the remote Neon credentials for you.
+- **Secure beyond your Mac** — the proxy listens only on localhost and encrypts the connection from your Mac to Neon with TLS.
+- **Disposable by default** — experiment freely for 72 hours, then claim the database if you want to keep it.
+- **Feels at home on macOS** — native desktop experience, Light and Dark appearances, storage visibility, connection status, and automatic updates.
+
+## Get started
+
+1. [Download the latest DMG](https://github.com/russdias/neon-localhost/releases/latest), open it, and drag Neon Localhost to Applications.
+2. Open the app and choose **Create Database**.
+3. Copy the local URL into your project or connect directly:
+
+```sh
+psql 'postgresql://localhost:5432/neondb?sslmode=disable'
+```
+
+For GUI clients, use:
+
+| Setting | Value |
+| --- | --- |
+| Host | `localhost` |
+| Port | `5432` |
+| Database | `neondb` |
+| Username | Any value |
+| Password | Leave empty |
+| SSL | Disable for the local connection |
+
+Your client talks to Neon Localhost without credentials or TLS. The app authenticates upstream and establishes the encrypted Neon connection behind the scenes.
+
+> Only one service can listen on port `5432`. Stop a local Postgres server or another proxy using that port before creating a database.
+
+## How it works
+
+```text
+Your app or database client
+          │
+          │  Postgres on localhost:5432
+          ▼
+    Neon Localhost
+          │
+          │  Authenticated Postgres over TLS
+          ▼
+      Neon Postgres
+```
+
+The local proxy binds only to the IPv4 and IPv6 loopback interfaces. Remote credentials remain inside the app and are never included in the local connection string.
+
+## Develop locally
+
+You will need Node.js, pnpm, Rust, and the macOS prerequisites for [Tauri](https://v2.tauri.app/start/prerequisites/).
 
 ```sh
 pnpm install
 pnpm tauri dev
 ```
 
-Click **Create local database**, copy the generated URL, and use it anywhere a Postgres connection string is accepted:
+The frontend is React and TypeScript. The native app and Postgres proxy are built with Rust and Tauri.
 
-```sh
-psql 'postgresql://localhost:5432/neondb?sslmode=disable'
-```
+<details>
+<summary><strong>Maintainer release process</strong></summary>
 
-GUI clients can use `localhost`, port `5432`, database `neondb`, any username, and an empty password. SSL and additional connection options are not required on the local hop.
-
-Only one service can listen on port 5432. Stop any local Postgres or other proxy using that port before creating the database.
-
-## Releases
+### Releasing
 
 Create a version commit and annotated tag from a clean `main` branch:
 
@@ -40,15 +91,21 @@ pnpm release:major # 0.1.0 -> 1.0.0
 git push origin main --follow-tags
 ```
 
-The version tag triggers the macOS release workflow. It builds a universal Intel and Apple Silicon DMG, signs it with Developer ID, notarizes the app and DMG, verifies Gatekeeper acceptance, and creates a draft GitHub Release with a SHA-256 checksum. It also signs and publishes the in-app updater package and `latest.json`. Once the draft is published, installed copies check for updates automatically.
+The version tag triggers the macOS release workflow. It builds a universal Intel and Apple Silicon DMG, signs it with Developer ID, notarizes the app and DMG, verifies Gatekeeper acceptance, and creates a draft GitHub Release with a SHA-256 checksum. It also signs and publishes the in-app updater package and `latest.json`.
 
 The release workflow requires these GitHub Actions secrets:
 
 - `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` for a base64-encoded Developer ID Application `.p12`;
 - `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` for notarization;
-- `APPLE_SIGNING_IDENTITY` and a generated `KEYCHAIN_PASSWORD` for the temporary CI keychain.
+- `APPLE_SIGNING_IDENTITY` and a generated `KEYCHAIN_PASSWORD` for the temporary CI keychain;
 - `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` for cryptographically verified in-app updates.
 
-The updater public key is embedded in the app. Keep a secure backup of the matching private key: users installed with that public key cannot receive updates signed by a replacement key.
+The updater public key is embedded in the app. Keep a secure backup of the matching private key: existing installations cannot accept updates signed by a replacement key.
 
 Release jobs create drafts intentionally. Test the downloaded DMG on a second Mac, then publish the draft from GitHub Releases.
+
+</details>
+
+---
+
+Neon Localhost is an independent open-source project and is not affiliated with Neon.
