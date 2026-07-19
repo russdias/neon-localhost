@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   color: #242426;
   background: transparent;
@@ -46,7 +47,13 @@ nav { min-width: 0; }
 .database-label small { color: var(--subtle); font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .status-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #2aaa60; box-shadow: 0 0 0 2px rgba(42,170,96,.14); }
 .no-databases { padding: 11px 10px; color: var(--subtle); font-size: 11px; }
-.update-button { margin-top: auto; min-height: 39px; padding: 5px 9px; display: flex; align-items: center; gap: 8px; color: var(--muted); border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: default; transition: color .12s ease, background-color .12s ease; }
+.appearance-control { margin-top: auto; min-height: 35px; padding: 0 5px 0 9px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 9px; }
+.appearance-control > span { flex: 1; }
+.appearance-control > div { height: 24px; padding: 2px; display: flex; border: 1px solid var(--line); border-radius: 6px; background: rgba(110,110,115,.09); }
+.appearance-control button { min-width: 25px; height: 18px; padding: 0 5px; display: grid; place-items: center; color: var(--subtle); border: 0; border-radius: 4px; background: transparent; font-size: 8px; cursor: default; transition: color .1s ease, background-color .1s ease, box-shadow .1s ease; }
+.appearance-control button.active { color: var(--text); background: var(--surface-raised); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.appearance-control button svg { width: 11px; height: 11px; }
+.update-button { margin-top: 3px; min-height: 39px; padding: 5px 9px; display: flex; align-items: center; gap: 8px; color: var(--muted); border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: default; transition: color .12s ease, background-color .12s ease; }
 .update-button > svg { width: 15px; height: 15px; flex: 0 0 15px; }
 .update-button > span { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 1px; }
 .update-button strong { overflow: hidden; font-size: 10px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
@@ -224,6 +231,7 @@ nav { min-width: 0; }
   .database-row.selected:hover { background: var(--pressed-fill); }
   .database-row:hover .database-glyph { border-color: rgba(31,120,70,.22); background: rgba(224,244,232,.95); }
   .about-button:hover, .update-button:hover:not(:disabled) { color: var(--text); background: var(--hover-fill); }
+  .appearance-control button:not(.active):hover { color: var(--text); background: var(--hover-fill); }
   .update-close:hover:not(:disabled) { color: var(--text); background: rgba(0,0,0,.09); }
   .sheet-primary:hover:not(:disabled) { border-color: #0e713b; background: linear-gradient(#26a15d, #18894d); }
   .sheet-secondary:hover:not(:disabled) { color: #202024; background: linear-gradient(#fff, #e7e7e8); }
@@ -240,6 +248,7 @@ nav { min-width: 0; }
 }
 
 .database-row:active, .about-button:active, .update-button:active:not(:disabled) { background: var(--pressed-fill); }
+.appearance-control button:active:not(.active) { background: var(--pressed-fill); }
 .stop-button:active { color: #8d2929; background: #f1dfdf; box-shadow: inset 0 1px 1px rgba(0,0,0,.06); }
 .primary-button:active:not(:disabled) { border-color: #106d39; background: #147a43; box-shadow: inset 0 1px 1px rgba(0,0,0,.12); }
 .segmented-control button:active:not(.active) { background: var(--pressed-fill); }
@@ -255,37 +264,35 @@ nav { min-width: 0; }
   .temporary-footer { margin-top: 15px; }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; --sidebar: rgba(43,43,45,.93); --pane: #242426; --toolbar: rgba(38,38,40,.86); --surface: #303032; --surface-raised: #38383a; --line: rgba(255,255,255,.105); --soft-line: rgba(255,255,255,.07); --text: #f1f1f2; --muted: #aaaab0; --subtle: #85858b; --accent-soft: #193a27; --selection: rgba(255,255,255,.105); --hover-fill: rgba(255,255,255,.065); --pressed-fill: rgba(255,255,255,.115); --field: #303032; }
-  .database-glyph { color: #91d1aa; border-color: rgba(125,210,157,.12); background: rgba(45,85,59,.55); }
-  .empty-icon { color: #8dd3a8; border-color: rgba(125,210,157,.14); background: rgba(31,73,45,.68); }
-  .empty-specs strong, .empty-specs code { color: #d6d6d9; }
-  .stop-button { color: #d5d5d8; border-color: rgba(255,255,255,.16); background: linear-gradient(#414143, #343436); }
-  .stop-button:hover { color: #ff9999; border-color: rgba(255,120,120,.25); background: linear-gradient(#4a4143, #3d3638); }
-  .segmented-control { background: #1e1e20; border-color: #4e4e52; }
-  .segmented-control button.active { color: #fff; background: #555558; }
-  .connection-panel { border-color: #505054; background: #2d2d2f; }
-  .connection-field { background: #2d2d2f; }
-  .connection-field code { color: #ededee; }
-  .connection-field button { color: #e0e0e2; background: linear-gradient(#48484b, #39393b); }
-  .connection-facts strong, .detail-row code { color: #dedee1; }
-  .neon-section { background: rgba(255,255,255,.035); }
-  .remote-icon { color: #98d5ae; border-color: rgba(125,210,157,.16); background: #243b2c; }
-  .storage-summary.warning > strong { color: #e1ad65; }
-  .storage-summary.danger > strong { color: #ef8b86; }
-  .remote-value code { color: #b8b8bd; }
-  .temporary-footer strong { color: #d8d8da; }
-  .temporary-footer button { color: #a5d6b8; border-color: #356647; background: #263b2d; }
-  .segmented-control button:not(.active):hover { color: #e2e2e4; background: rgba(255,255,255,.08); }
-  .connection-field button:hover { color: #fff; background: linear-gradient(#505053, #414144); }
-  .disclosure-row:hover .remote-icon { border-color: rgba(125,210,157,.28); background: #2d4a37; }
-  .temporary-footer button:hover { color: #c4e7d1; border-color: #4d825f; background: #2d4936; }
-  .status-bar { background: rgba(37,37,39,.88); }
-  .status-bar code { color: #a5a5aa; }
-  .update-sheet { border-color: rgba(255,255,255,.17); background: rgba(47,47,49,.98); box-shadow: 0 22px 70px rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.35); }
-  .update-close { background: rgba(255,255,255,.08); }
-  .update-mark { color: #c5c5c9; border-color: rgba(255,255,255,.14); background: linear-gradient(#444447, #353537); }
-  .update-mark.available { color: #9bd6b1; border-color: rgba(125,210,157,.18); background: linear-gradient(#294a35, #243c2d); }
-  .update-warning { color: #d8bd8e; border-color: rgba(214,164,75,.2); background: rgba(88,65,28,.35); }
-  .sheet-secondary { color: #e2e2e4; border-color: rgba(255,255,255,.16); background: linear-gradient(#49494c, #3a3a3c); }
-}
+:root[data-theme="dark"] { color-scheme: dark; --sidebar: rgba(43,43,45,.93); --pane: #242426; --toolbar: rgba(38,38,40,.86); --surface: #303032; --surface-raised: #38383a; --line: rgba(255,255,255,.105); --soft-line: rgba(255,255,255,.07); --text: #f1f1f2; --muted: #aaaab0; --subtle: #85858b; --accent-soft: #193a27; --selection: rgba(255,255,255,.105); --hover-fill: rgba(255,255,255,.065); --pressed-fill: rgba(255,255,255,.115); --field: #303032; }
+:root[data-theme="dark"] .database-glyph { color: #91d1aa; border-color: rgba(125,210,157,.12); background: rgba(45,85,59,.55); }
+:root[data-theme="dark"] .empty-icon { color: #8dd3a8; border-color: rgba(125,210,157,.14); background: rgba(31,73,45,.68); }
+:root[data-theme="dark"] .empty-specs strong, :root[data-theme="dark"] .empty-specs code { color: #d6d6d9; }
+:root[data-theme="dark"] .stop-button { color: #d5d5d8; border-color: rgba(255,255,255,.16); background: linear-gradient(#414143, #343436); }
+:root[data-theme="dark"] .stop-button:hover { color: #ff9999; border-color: rgba(255,120,120,.25); background: linear-gradient(#4a4143, #3d3638); }
+:root[data-theme="dark"] .segmented-control { background: #1e1e20; border-color: #4e4e52; }
+:root[data-theme="dark"] .segmented-control button.active { color: #fff; background: #555558; }
+:root[data-theme="dark"] .connection-panel { border-color: #505054; background: #2d2d2f; }
+:root[data-theme="dark"] .connection-field { background: #2d2d2f; }
+:root[data-theme="dark"] .connection-field code { color: #ededee; }
+:root[data-theme="dark"] .connection-field button { color: #e0e0e2; background: linear-gradient(#48484b, #39393b); }
+:root[data-theme="dark"] .connection-facts strong, :root[data-theme="dark"] .detail-row code { color: #dedee1; }
+:root[data-theme="dark"] .neon-section { background: rgba(255,255,255,.035); }
+:root[data-theme="dark"] .remote-icon { color: #98d5ae; border-color: rgba(125,210,157,.16); background: #243b2c; }
+:root[data-theme="dark"] .storage-summary.warning > strong { color: #e1ad65; }
+:root[data-theme="dark"] .storage-summary.danger > strong { color: #ef8b86; }
+:root[data-theme="dark"] .remote-value code { color: #b8b8bd; }
+:root[data-theme="dark"] .temporary-footer strong { color: #d8d8da; }
+:root[data-theme="dark"] .temporary-footer button { color: #a5d6b8; border-color: #356647; background: #263b2d; }
+:root[data-theme="dark"] .segmented-control button:not(.active):hover { color: #e2e2e4; background: rgba(255,255,255,.08); }
+:root[data-theme="dark"] .connection-field button:hover { color: #fff; background: linear-gradient(#505053, #414144); }
+:root[data-theme="dark"] .disclosure-row:hover .remote-icon { border-color: rgba(125,210,157,.28); background: #2d4a37; }
+:root[data-theme="dark"] .temporary-footer button:hover { color: #c4e7d1; border-color: #4d825f; background: #2d4936; }
+:root[data-theme="dark"] .status-bar { background: rgba(37,37,39,.88); }
+:root[data-theme="dark"] .status-bar code { color: #a5a5aa; }
+:root[data-theme="dark"] .update-sheet { border-color: rgba(255,255,255,.17); background: rgba(47,47,49,.98); box-shadow: 0 22px 70px rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.35); }
+:root[data-theme="dark"] .update-close { background: rgba(255,255,255,.08); }
+:root[data-theme="dark"] .update-mark { color: #c5c5c9; border-color: rgba(255,255,255,.14); background: linear-gradient(#444447, #353537); }
+:root[data-theme="dark"] .update-mark.available { color: #9bd6b1; border-color: rgba(125,210,157,.18); background: linear-gradient(#294a35, #243c2d); }
+:root[data-theme="dark"] .update-warning { color: #d8bd8e; border-color: rgba(214,164,75,.2); background: rgba(88,65,28,.35); }
+:root[data-theme="dark"] .sheet-secondary { color: #e2e2e4; border-color: rgba(255,255,255,.16); background: linear-gradient(#49494c, #3a3a3c); }

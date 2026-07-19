@@ -7,6 +7,7 @@ Neon Localhost is a native macOS desktop app that:
 - provisions an unclaimed, 72-hour Neon database without requiring an account;
 - starts a Postgres protocol proxy bound only to the IPv4 and IPv6 localhost interfaces on port `5432`;
 - accepts passwordless local connections and handles Neon TLS and authentication inside the proxy;
+- follows the Mac appearance by default, with persistent Light and Dark overrides;
 - provides a claim link if you want to keep the database.
 
 ## Run it

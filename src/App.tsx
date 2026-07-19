@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import "./App.css";
+import { applyAppearance, saveAppearance, storedAppearance, type Appearance } from "./theme";
 
 type LocalDatabase = {
   status: string;
@@ -123,6 +124,14 @@ function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17" /></svg>;
 }
 
+function SunIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></svg>;
+}
+
+function MoonIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 15.3A8 8 0 0 1 8.7 5a7.5 7.5 0 1 0 10.3 10.3Z" /></svg>;
+}
+
 function App() {
   const previewMode = import.meta.env.DEV ? new URLSearchParams(window.location.search).get("preview") : null;
   const isPreview = previewMode !== null;
@@ -167,6 +176,17 @@ function App() {
   const [downloadSize, setDownloadSize] = useState<number | null>(null);
   const updateCheckInFlight = useRef(false);
   const downloadedBytesRef = useRef(0);
+  const [appearance, setAppearance] = useState<Appearance>(storedAppearance);
+
+  useEffect(() => {
+    saveAppearance(appearance);
+    const systemAppearance = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncSystemAppearance = () => {
+      if (appearance === "auto") applyAppearance("auto");
+    };
+    systemAppearance.addEventListener("change", syncSystemAppearance);
+    return () => systemAppearance.removeEventListener("change", syncSystemAppearance);
+  }, [appearance]);
 
   useEffect(() => {
     if (isPreview) return;
@@ -438,6 +458,14 @@ function App() {
           )}
         </nav>
 
+        <div className="appearance-control">
+          <span>Appearance</span>
+          <div role="group" aria-label="Appearance">
+            <button type="button" className={appearance === "auto" ? "active" : ""} aria-pressed={appearance === "auto"} onClick={() => setAppearance("auto")} title="Match system appearance">Auto</button>
+            <button type="button" className={appearance === "light" ? "active" : ""} aria-pressed={appearance === "light"} onClick={() => setAppearance("light")} title="Use light appearance" aria-label="Light appearance"><SunIcon /></button>
+            <button type="button" className={appearance === "dark" ? "active" : ""} aria-pressed={appearance === "dark"} onClick={() => setAppearance("dark")} title="Use dark appearance" aria-label="Dark appearance"><MoonIcon /></button>
+          </div>
+        </div>
         <button type="button" className={`update-button ${availableUpdate ? "has-update" : ""}`} onClick={() => availableUpdate ? setShowUpdate(true) : void checkForUpdates(true)} disabled={updateBusy}>
           <UpdateIcon />
           <span><strong>{availableUpdate ? "Update available" : updateState === "checking" ? "Checking for updates…" : "Check for Updates"}</strong>{appVersion && <small>{availableUpdate ? `Version ${availableUpdate.version}` : `Version ${appVersion}`}</small>}</span>
