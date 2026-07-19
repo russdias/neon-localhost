@@ -124,6 +124,10 @@ function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17" /></svg>;
 }
 
+function ConnectedIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.6 2.6L16.5 9" /></svg>;
+}
+
 function SunIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></svg>;
 }
@@ -480,7 +484,7 @@ function App() {
         <header className="toolbar" data-tauri-drag-region>
           <div className="toolbar-title">
             <h1>{database ? "neondb" : "Neon Localhost"}</h1>
-            {database && <span className="running-label"><i />Running</span>}
+            {database && <span className="running-label"><i />Connected</span>}
           </div>
           {database && (
             <button type="button" className="stop-button" onClick={stopProxy} disabled={stopping} title="Stop local database" aria-busy={stopping}>
@@ -518,11 +522,17 @@ function App() {
             </div>
           ) : (
             <div className="database-content">
+              <div className="connected-banner" role="status" aria-label="Connected to Neon and ready for local applications">
+                <span className="connected-icon"><ConnectedIcon /></span>
+                <div><strong>Connected to Neon</strong><span>Secure local Postgres is ready for your apps</span></div>
+                <span className="connected-endpoint"><i />localhost:{database.port}</span>
+              </div>
+
               <section className="connection-section">
                 <div className="section-title-row">
                   <div>
                     <span className="section-eyebrow">Local Postgres</span>
-                    <h2>Connect to your database</h2>
+                    <h2>Connect your app</h2>
                     <p>Copy a connection string or enter the details in any database client.</p>
                   </div>
                   <div className="segmented-control" aria-label="Connection format">
@@ -607,12 +617,12 @@ function App() {
         </div>
 
         <footer className={`status-bar ${database ? "ready" : creating ? "starting" : ""}`} aria-live="polite">
-          <div className="status-primary"><i />{database ? "Proxy ready" : creating ? "Starting proxy" : "Proxy stopped"}</div>
+          <div className="status-primary"><i />{database ? "Connected to Neon" : creating ? "Starting proxy" : "Proxy stopped"}</div>
           {database && <><span className="status-divider" /><code>localhost:{database.port}</code></>}
           <div className="status-secondary">
             {database ? (
               <>
-                <span>{metrics.activeConnections} active</span>
+                <span>{metrics.activeConnections > 0 ? `${metrics.activeConnections} active ${metrics.activeConnections === 1 ? "client" : "clients"}` : metrics.totalConnections > 0 ? "No active clients" : "Waiting for a local client"}</span>
                 <span>{formatBytes(metrics.bytesToNeon + metrics.bytesFromNeon)} transferred</span>
                 {metrics.failedConnections > 0 && <span className="status-failures">{metrics.failedConnections} failed</span>}
               </>
