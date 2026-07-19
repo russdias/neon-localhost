@@ -124,10 +124,6 @@ function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17" /></svg>;
 }
 
-function ConnectedIcon() {
-  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.6 2.6L16.5 9" /></svg>;
-}
-
 function SunIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></svg>;
 }
@@ -455,7 +451,6 @@ function App() {
             <button type="button" className="database-row selected" aria-current="page">
               <span className="database-glyph"><DatabaseIcon /></span>
               <span className="database-label"><strong>neondb</strong><small>localhost:{database.port}</small></span>
-              <span className="status-dot" />
             </button>
           ) : (
             <div className="no-databases">No local databases</div>
@@ -522,18 +517,12 @@ function App() {
             </div>
           ) : (
             <div className="database-content">
-              <div className="connected-banner" role="status" aria-label="Connected to Neon and ready for local applications">
-                <span className="connected-icon"><ConnectedIcon /></span>
-                <div><strong>Connected to Neon</strong><span>Secure local Postgres is ready for your apps</span></div>
-                <span className="connected-endpoint"><i />localhost:{database.port}</span>
-              </div>
-
               <section className="connection-section">
                 <div className="section-title-row">
                   <div>
-                    <span className="section-eyebrow">Local Postgres</span>
-                    <h2>Connect your app</h2>
-                    <p>Copy a connection string or enter the details in any database client.</p>
+                    <span className="section-eyebrow"><i />Local Postgres is ready</span>
+                    <h2>Connect to neondb</h2>
+                    <p>Use this local connection in your app or database client.</p>
                   </div>
                   <div className="segmented-control" aria-label="Connection format">
                     <button type="button" aria-pressed={format === "url"} className={format === "url" ? "active" : ""} onClick={() => setFormat("url")}>URL</button>
@@ -552,25 +541,24 @@ function App() {
                   </div>
 
                   <div className="connection-facts">
-                    <div><span>Host</span><strong>localhost</strong></div>
-                    <div><span>Port</span><strong>{database.port}</strong></div>
+                    <div><span>Endpoint</span><strong>localhost:{database.port}</strong></div>
                     <div><span>Database</span><strong>neondb</strong></div>
                     <div><span>Password</span><strong>None</strong></div>
                   </div>
+                  <div className="connection-security">
+                    <LockIcon />
+                    <span>No local password</span>
+                    <i />
+                    <span>Encrypted connection to Neon</span>
+                  </div>
                 </div>
               </section>
-
-              <div className="security-note">
-                <LockIcon />
-                <span>No local password. Your connection from this Mac to Neon is encrypted.</span>
-              </div>
 
               <div className="section-eyebrow database-eyebrow">Database</div>
               <section className="neon-section">
                 <button type="button" className="disclosure-row" onClick={() => setShowDetails(!showDetails)} aria-expanded={showDetails}>
                   <span className="remote-icon"><DatabaseIcon /></span>
-                  <span className="disclosure-copy"><strong>Remote Neon database</strong><small>TLS encrypted · Credentials managed by Neon Localhost</small></span>
-                  <span className="expiry">{timeLeft} left</span>
+                  <span className="disclosure-copy"><strong>Neon database</strong><small>Remote details and credentials</small></span>
                   <span className="disclosure-chevron"><ChevronIcon open={showDetails} /></span>
                 </button>
 
@@ -604,7 +592,7 @@ function App() {
 
               <footer className="temporary-footer">
                 <ClockIcon />
-                <div><strong>This database is temporary</strong><span>Claim it before the timer ends to keep your data.</span></div>
+                <div><strong>Temporary database</strong><span>{timeLeft} remaining</span></div>
                 <button type="button" onClick={claimDatabase} disabled={claiming}>
                   {claiming ? "Opening…" : "Claim Database"} {!claiming && <ExternalIcon />}
                 </button>
@@ -617,8 +605,7 @@ function App() {
         </div>
 
         <footer className={`status-bar ${database ? "ready" : creating ? "starting" : ""}`} aria-live="polite">
-          <div className="status-primary"><i />{database ? "Connected to Neon" : creating ? "Starting proxy" : "Proxy stopped"}</div>
-          {database && <><span className="status-divider" /><code>localhost:{database.port}</code></>}
+          <div className="status-primary"><i />{database ? "Proxy ready" : creating ? "Starting proxy" : "Proxy stopped"}</div>
           <div className="status-secondary">
             {database ? (
               <>
