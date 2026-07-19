@@ -1,0 +1,132 @@
+name: CI PR Summary
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ci-pr-summary-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    name: Comment on pull request
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create or update CI summary
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const marker = "<!-- neon-localhost-ci-summary -->";
+            const run = context.payload.workflow_run;
+            const pullRequest = run.pull_requests[0];
+            const { owner, repo } = context.repo;
+
+            const { data } = await github.rest.actions.listJobsForWorkflowRun({
+              owner,
+              repo,
+              run_id: run.id,
+              per_page: 100,
+            });
+
+            const icons = {
+              success: "✅",
+              failure: "❌",
+              cancelled: "⚪",
+              skipped: "⏭️",
+              timed_out: "⏱️",
+              action_required: "⚠️",
+              neutral: "➖",
+              stale: "⚪",
+            };
+
+            const labels = {
+              success: "Passed",
+              failure: "Failed",
+              cancelled: "Cancelled",
+              skipped: "Skipped",
+              timed_out: "Timed out",
+              action_required: "Action required",
+              neutral: "Neutral",
+              stale: "Stale",
+            };
+
+            const duration = (startedAt, completedAt) => {
+              if (!startedAt || !completedAt) return "—";
+              const seconds = Math.max(
+                0,
+                Math.round((new Date(completedAt) - new Date(startedAt)) / 1000),
+              );
+              if (seconds < 60) return `${seconds}s`;
+              return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+            };
+
+            const rows = data.jobs
+              .filter((job) => !job.name.startsWith("Comment on pull request"))
+              .map((job) => {
+                const conclusion = job.conclusion || "neutral";
+                const icon = icons[conclusion] || "➖";
+                const label = labels[conclusion] || conclusion;
+                const name = job.html_url
+                  ? `[${job.name}](${job.html_url})`
+                  : job.name;
+                return `| ${name} | ${icon} ${label} | ${duration(job.started_at, job.completed_at)} |`;
+              })
+              .join("\n");
+
+            const passed = run.conclusion === "success";
+            const heading = passed ? "✅ CI passed" : "❌ CI needs attention";
+            const shortSha = run.head_sha.slice(0, 7);
+            const body = [
+              marker,
+              `## ${heading}`,
+              "",
+              "| Check | Result | Duration |",
+              "| :-- | :-- | --: |",
+              rows || "| No jobs reported | ➖ Unknown | — |",
+              "",
+              `[View the complete workflow run](${run.html_url}) · Commit \`${shortSha}\``,
+              "",
+              "<sub>This comment is updated automatically when CI runs again.</sub>",
+            ].join("\n");
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner,
+                repo,
+                issue_number: pullRequest.number,
+                per_page: 100,
+              },
+            );
+            const existing = comments.find(
+              (comment) =>
+                comment.user?.login === "github-actions[bot]" &&
+                comment.body?.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated CI summary on PR #${pullRequest.number}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pullRequest.number,
+                body,
+              });
+              core.info(`Created CI summary on PR #${pullRequest.number}`);
+            }
