@@ -479,7 +479,7 @@ function App() {
         <header className="toolbar" data-tauri-drag-region>
           <div className="toolbar-title">
             <h1>{database ? "neondb" : "Neon Localhost"}</h1>
-            {database && <span className="running-label"><i />Connected</span>}
+            {database && <span className="running-label"><i />Connected to Neon</span>}
           </div>
           {database && (
             <button type="button" className="stop-button" onClick={stopProxy} disabled={stopping} title="Stop local database" aria-busy={stopping}>
@@ -520,7 +520,7 @@ function App() {
               <section className="connection-section">
                 <div className="section-title-row">
                   <div>
-                    <span className="section-eyebrow"><i />Local Postgres is ready</span>
+                    <span className="connection-state"><i /><strong>Connected to Neon</strong><span>Secure tunnel active</span></span>
                     <h2>Connect to neondb</h2>
                     <p>Use this local connection in your app or database client.</p>
                   </div>
@@ -558,17 +558,18 @@ function App() {
               <section className="neon-section">
                 <button type="button" className="disclosure-row" onClick={() => setShowDetails(!showDetails)} aria-expanded={showDetails}>
                   <span className="remote-icon"><DatabaseIcon /></span>
-                  <span className="disclosure-copy"><strong>Neon database</strong><small>Remote details and credentials</small></span>
+                  <span className="disclosure-copy"><strong>Neon database</strong><small>TLS encrypted · Credentials managed for you</small></span>
+                  <span className="neon-status"><i />Online</span>
                   <span className="disclosure-chevron"><ChevronIcon open={showDetails} /></span>
                 </button>
 
                 <div className={`storage-summary ${storageTone} ${storageRefreshing ? "updating" : ""}`} aria-label="Database storage usage">
-                  <span className="storage-label">Storage</span>
+                  <span className="storage-label"><strong>Storage</strong><small>{storage ? formatBytes(storage.usedBytes) : "—"} used</small></span>
                   <div className="storage-meter">
                     <div className="storage-track" role="progressbar" aria-label="Storage used" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(storagePercent)}><i style={{ width: `${storagePercent}%` }} /></div>
                     <small>{storageRefreshError ? "Couldn’t update" : storageRefreshing ? "Updating…" : storage ? `${Math.round(storagePercent)}% used` : "Checking usage…"}</small>
                   </div>
-                  <strong>{storage ? `${formatBytes(storage.usedBytes)} / ${formatBytes(storage.limitBytes)}` : "—"}</strong>
+                  <strong>{storage ? `${formatBytes(storage.limitBytes)} limit` : "—"}</strong>
                   <button type="button" className="storage-refresh" onClick={refreshStorage} disabled={storageRefreshing} title="Refresh storage usage" aria-label="Refresh storage usage">
                     <RefreshIcon />
                   </button>
