@@ -1,6 +1,6 @@
 [package]
 name = "neon-localhost"
-version = "0.1.8"
+version = "0.1.9"
 description = "Run a temporary Neon Postgres database through localhost"
 authors = ["Russ Dias"]
 edition = "2021"
