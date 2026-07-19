@@ -18,25 +18,27 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
 
       - name: Install Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install Rust targets
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
           components: rustfmt, clippy
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
 
@@ -141,6 +143,31 @@ jobs:
           xcrun stapler staple "$dmg"
           xcrun stapler validate "$dmg"
           spctl -a -t open --context context:primary-signature -vv "$dmg"
+
+          mount_point="$RUNNER_TEMP/neon-localhost-dmg"
+          mkdir -p "$mount_point"
+          diskutil image attach --readOnly --nobrowse --mountPoint "$mount_point" "$dmg" >/dev/null
+          cleanup_mount() {
+            hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+          }
+          trap cleanup_mount EXIT
+
+          app="$(find "$mount_point" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl -a -t exec -vv "$app"
+
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          archs="$(lipo -archs "$app/Contents/MacOS/$executable")"
+          for required_arch in arm64 x86_64; do
+            [[ " $archs " == *" $required_arch "* ]] || {
+              echo "Release app is missing required architecture $required_arch (found: $archs)" >&2
+              exit 1
+            }
+          done
+
+          cleanup_mount
+          trap - EXIT
 
           updater="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app.tar.gz' -print -quit)"
           test -n "$updater"
