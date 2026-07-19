@@ -494,17 +494,20 @@ function App() {
           ) : !database ? (
             <div className={`empty-state ${creating ? "creating" : ""}`}>
               <span className="empty-icon"><DatabaseIcon /></span>
-              <span className="empty-kicker">Local Postgres, powered by Neon</span>
-              <h2>{creating ? "Creating your database" : "No database running"}</h2>
-              <p>{creating ? "Neon is provisioning Postgres and preparing a secure local connection." : "Create a temporary Postgres database that works like it is installed directly on this Mac."}</p>
-              <div className="empty-specs">
-                <div><span>Local address</span><code>localhost:5432</code></div>
-                <div><span>Authentication</span><strong>No password</strong></div>
-                <div><span>Available for</span><strong>72 hours</strong></div>
+              <span className="empty-kicker">Local Postgres · Powered by Neon</span>
+              <h2>{creating ? "Starting local Postgres…" : "Start Postgres locally"}</h2>
+              <p>{creating ? "Neon is creating your database and opening a secure local connection." : "Get a fresh Postgres database on this Mac—without installing Postgres or creating an account."}</p>
+              <div className="empty-endpoint" aria-label="Local connection after creation">
+                <span className="empty-endpoint-status"><i /></span>
+                <span className="empty-endpoint-copy">
+                  <small>{creating ? "OPENING LOCAL ADDRESS" : "LOCAL ADDRESS"}</small>
+                  <code>localhost:5432</code>
+                </span>
+                <span className="empty-endpoint-auth"><LockIcon /> No password</span>
               </div>
               <button type="button" className={`primary-button ${creating ? "is-loading" : ""}`} onClick={createDatabase} disabled={creating} aria-busy={creating}>
                 {creating && <span className="spinner" />}
-                {creating ? "Creating…" : "Create Local Database"}
+                {creating ? "Creating Database…" : "Create Database"}
               </button>
               {creating ? (
                 <div className="creation-feedback" role="status">
@@ -512,7 +515,7 @@ function App() {
                   <p>Provisioning Neon and securing <code>localhost:5432</code></p>
                 </div>
               ) : (
-                <span className="empty-note">No account required · Claim it later to keep it</span>
+                <span className="empty-note"><ClockIcon /> Temporary for 72 hours <i /> Claim anytime to keep it</span>
               )}
             </div>
           ) : (
