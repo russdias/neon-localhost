@@ -10,6 +10,8 @@ Neon Localhost is a native macOS desktop app that:
 - follows the Mac appearance by default, with persistent Light and Dark overrides;
 - provides a claim link if you want to keep the database.
 
+<img width="2032" height="1592" alt="CleanShot 2026-07-19 at 20 21 10@2x" src="https://github.com/user-attachments/assets/5c025ee8-e8e6-45c3-9e25-aebd7a207527" />
+
 ## Run it
 
 ```sh
