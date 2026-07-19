@@ -56,8 +56,9 @@ jobs:
       - name: Run release checks
         run: |
           cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-          cargo test --manifest-path src-tauri/Cargo.toml
+          cargo check --manifest-path src-tauri/Cargo.toml --locked --all-targets
+          cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --all-targets
           pnpm build
 
       - name: Validate release secrets
