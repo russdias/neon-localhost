@@ -17,7 +17,7 @@ concurrency:
 jobs:
   comment:
     name: Comment on pull request
-    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -27,8 +27,27 @@ jobs:
           script: |
             const marker = "<!-- neon-localhost-ci-summary -->";
             const run = context.payload.workflow_run;
-            const pullRequest = run.pull_requests[0];
             const { owner, repo } = context.repo;
+
+            let pullRequest = run.pull_requests[0];
+            if (!pullRequest) {
+              core.info("Workflow payload has no PR; looking it up by commit SHA");
+              const { data: associatedPullRequests } =
+                await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner,
+                  repo,
+                  commit_sha: run.head_sha,
+                });
+              pullRequest =
+                associatedPullRequests.find(
+                  (candidate) => candidate.head.sha === run.head_sha,
+                ) || associatedPullRequests[0];
+            }
+
+            if (!pullRequest) {
+              core.notice(`No pull request found for commit ${run.head_sha}`);
+              return;
+            }
 
             const { data } = await github.rest.actions.listJobsForWorkflowRun({
               owner,
